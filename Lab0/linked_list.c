@@ -91,5 +91,9 @@ int main( int argc, char ** argv)
     input_sorted(&root, 1);
     input_sorted(&root, 100);
     print(&root); // should print 1, 5, 8, 9, 10, 20, 25, 20, 2, 100
+
+    /*  total heap usage: 10 allocs, 10 frees 
+	All heap blocks were freed -- no leaks are possible */
+    clear(&root);
 }
 
