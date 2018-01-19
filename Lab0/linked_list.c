@@ -6,7 +6,6 @@ struct list_item
 {
     int value;
     struct list_item *next;
-    
 };
 
 void append(struct list_item *first, int x)
