@@ -9,22 +9,22 @@ int main(int argc, char ** argv)
     bufi = buf; // bufi points to start of buf, i.e. points to the first char*
     bufend = &buf[9]; // bufend points to char at buf[9] ? we only hold 9 element, last index is 8?
 
-    while (bufi != bufend){ // fill buf with chars from str in reverse order
-	*bufi = stri;
-	bufi++;
-	stri--;
+    while (bufi != bufend+1){ // fill buf with chars from str in reverse order
+        *bufi = stri;
+        bufi++;
+        stri--;
     }
-    
+
     int i = 0;
     while (bufi != buf){ 
-// we dereference the char* and decrement char value by 3, but if first pointed to is beyond char array, segfault?
-//	*(*bufi) -= 32;
-	bufi--; // we decrement bufi to be the beginning of buf array again
+        // we dereference the char* and decrement char value by 3, but if first pointed to is beyond char array, segfault?
+        //         *(*bufi) -= 32;
+        bufi--; // we decrement bufi to be the beginning of buf array again
         *(*bufi) -= 32; // decrement by 32 after decrementing bufi instead
     }
     while (bufi != bufend){ // we print the chars in buf
-    	printf("%c", **bufi);
-    	bufi++;
+        printf("%c", **bufi);
+        bufi++;
     }
     printf("\n");
 }

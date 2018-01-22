@@ -1,16 +1,21 @@
 CC ?= gcc
 CFLAGS ?= -g -Wall -Wextra -Wpedantic --std=c11
 
-PROGRAMS = find_bug \
-		   linked_list
+BINDIR = bin
 
-all: ${PROGRAMS} 
+PROGRAMS = ${BINDIR}/find_bug \
+		   ${BINDIR}/linked_list
 
-find_bug: find_bug.c
+all: ${BINDIR} ${PROGRAMS} 
+
+${BINDIR}:
+	test -d ${BINDIR} || mkdir ${BINDIR}
+
+${BINDIR}/find_bug: find_bug.c
 	${CC} ${CFLAGS} $^ -o $@
 
-linked_list: linked_list.c
+${BINDIR}/linked_list: linked_list.c
 	${CC} ${CFLAGS} $^ -o $@
 
 clean:
-	rm -f ${PROGRAMS} *~
+	rm -rf ${BINDIR} *~
