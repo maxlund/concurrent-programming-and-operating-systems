@@ -7,8 +7,7 @@ int main(int argc, char ** argv)
     char *buf[9]; // char* array of size 9
     char **bufi, **bufend; // two pointers to char*
     bufi = buf; // bufi points to start of buf, i.e. points to the first char*
-    bufend = &buf[9]; // bufend points to char at buf[9] ? we only hold 9 element, last index is 8?
-
+    bufend = &buf[9]; // bufend points to char at buf[9] 
     while (bufi != bufend)
     { // fill buf with chars from str in reverse order
         *bufi = stri;
