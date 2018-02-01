@@ -1,0 +1,277 @@
+Index: devices/timer.c
+===================================================================
+--- devices/timer.c	(revision 2)
++++ devices/timer.c	(working copy)
+@@ -7,6 +7,7 @@
+ #include "threads/io.h"
+ #include "threads/synch.h"
+ #include "threads/thread.h"
++#include "list.h"
+   
+ /* See [8254] for hardware details of the 8254 timer chip. */
+ 
+@@ -29,6 +30,8 @@
+ static void busy_wait (int64_t loops);
+ static void real_time_sleep (int64_t num, int32_t denom);
+ 
++struct list wait_list; // wait list for our threads
++
+ /* Sets up the 8254 Programmable Interval Timer (PIT) to
+    interrupt PIT_FREQ times per second, and registers the
+    corresponding interrupt. */
+@@ -44,6 +47,9 @@
+   outb (0x40, count >> 8);
+ 
+   intr_register_ext (0x20, timer_interrupt, "8254 Timer");
++
++  // Init our wait list
++  list_init(&wait_list);
+ }
+ 
+ /* Calibrates loops_per_tick, used to implement brief delays. */
+@@ -83,7 +89,6 @@
+   barrier ();
+   return t;
+ }
+-
+ /* Returns the number of timer ticks elapsed since THEN, which
+    should be a value once returned by timer_ticks(). */
+ int64_t
+@@ -97,10 +102,19 @@
+ timer_sleep (int64_t ticks) 
+ {
+   int64_t start = timer_ticks ();
++  int64_t wt = start + ticks;
++  struct thread * ct = thread_current();
++  
++  ASSERT (intr_get_level () == INTR_ON);
+ 
+-  ASSERT (intr_get_level () == INTR_ON);
+-  while (timer_elapsed (start) < ticks) 
+-    thread_yield ();
++  enum intr_level old_level = intr_disable();
++
++  ct->wait_time = wt;
++  list_push_back(&wait_list, &ct->wait_elem);
++
++  thread_block(); // thread_block() sets thread statsu to THREAD_BLOCKED
++
++  intr_set_level(old_level);
+ }
+ 
+ /* Suspends execution for approximately MS milliseconds. */
+@@ -136,26 +150,47 @@
+ timer_interrupt (struct intr_frame *args UNUSED)
+ {
+   ticks++;
++  // Check if there is something in the list
++  if (!list_empty(&wait_list))
++  {
++      struct list_elem * e = list_begin(&wait_list);
++      while (e != list_end(&wait_list))
++      {
++          struct thread * ts = list_entry(e, struct thread, wait_elem);
++          // check status and elapsed time
++          if (ts->status == THREAD_BLOCKED && ticks >= ts->wait_time)
++          {
++              // Only now (i.e, if the thread is blocked AND if the ticks have
++              // exceeded the waiting time) we want to unblock
++              thread_unblock(ts);
++              e = list_remove(e);
++          }
++          else
++          {
++              e = list_next(e);
++          }
++      }
++  }
+   thread_tick ();
+ }
+ 
+ /* Returns true if LOOPS iterations waits for more than one timer
+    tick, otherwise false. */
+-static bool
++    static bool
+ too_many_loops (unsigned loops) 
+ {
+-  /* Wait for a timer tick. */
+-  int64_t start = ticks;
+-  while (ticks == start)
+-    barrier ();
++    /* Wait for a timer tick. */
++    int64_t start = ticks;
++    while (ticks == start)
++        barrier ();
+ 
+-  /* Run LOOPS loops. */
+-  start = ticks;
+-  busy_wait (loops);
++    /* Run LOOPS loops. */
++    start = ticks;
++    busy_wait (loops);
+ 
+-  /* If the tick count changed, we iterated too long. */
+-  barrier ();
+-  return start != ticks;
++    /* If the tick count changed, we iterated too long. */
++    barrier ();
++    return start != ticks;
+ }
+ 
+ /* Iterates through a simple loop LOOPS times, for implementing
+@@ -165,40 +200,40 @@
+    affect timings, so that if this function was inlined
+    differently in different places the results would be difficult
+    to predict. */
+-static void NO_INLINE
++    static void NO_INLINE
+ busy_wait (int64_t loops) 
+ {
+-  while (loops-- > 0)
+-    barrier ();
++    while (loops-- > 0)
++        barrier ();
+ }
+ 
+ /* Sleep for approximately NUM/DENOM seconds. */
+-static void
++    static void
+ real_time_sleep (int64_t num, int32_t denom) 
+ {
+-  /* Convert NUM/DENOM seconds into timer ticks, rounding down.
+-          
+-        (NUM / DENOM) s          
+-     ---------------------- = NUM * TIMER_FREQ / DENOM ticks. 
+-     1 s / TIMER_FREQ ticks
+-  */
+-  int64_t ticks = num * TIMER_FREQ / denom;
++    /* Convert NUM/DENOM seconds into timer ticks, rounding down.
+ 
+-  ASSERT (intr_get_level () == INTR_ON);
+-  if (ticks > 0)
++       (NUM / DENOM) s          
++       ---------------------- = NUM * TIMER_FREQ / DENOM ticks. 
++       1 s / TIMER_FREQ ticks
++       */
++    int64_t ticks = num * TIMER_FREQ / denom;
++
++    ASSERT (intr_get_level () == INTR_ON);
++    if (ticks > 0)
+     {
+-      /* We're waiting for at least one full timer tick.  Use
+-         timer_sleep() because it will yield the CPU to other
+-         processes. */                
+-      timer_sleep (ticks); 
++        /* We're waiting for at least one full timer tick.  Use
++           timer_sleep() because it will yield the CPU to other
++           processes. */                
++        timer_sleep (ticks); 
+     }
+-  else 
++    else 
+     {
+-      /* Otherwise, use a busy-wait loop for more accurate
+-         sub-tick timing.  We scale the numerator and denominator
+-         down by 1000 to avoid the possibility of overflow. */
+-      ASSERT (denom % 1000 == 0);
+-      busy_wait (loops_per_tick * num / 1000 * TIMER_FREQ / (denom / 1000)); 
++        /* Otherwise, use a busy-wait loop for more accurate
++           sub-tick timing.  We scale the numerator and denominator
++           down by 1000 to avoid the possibility of overflow. */
++        ASSERT (denom % 1000 == 0);
++        busy_wait (loops_per_tick * num / 1000 * TIMER_FREQ / (denom / 1000)); 
+     }
+ }
+ 
+Index: lib/kernel/list.c
+===================================================================
+--- lib/kernel/list.c	(revision 2)
++++ lib/kernel/list.c	(working copy)
+@@ -1,3 +1,4 @@
++#include "threads/thread.h"
+ #include "list.h"
+ #include "../debug.h"
+ 
+@@ -530,3 +531,15 @@
+     }
+   return min;
+ }
++
++bool thread_less_than(const struct list_elem *first, const struct list_elem *second, void *aux)
++{
++    struct thread *t1 = list_entry(first, struct thread, wait_elem);
++    struct thread *t2 = list_entry(second, struct thread, wait_elem);
++   
++   if (t1->wait_time == t2->wait_time) // sort by priority if threads wake_time is the same
++      return t1->priority < t2->priority;
++
++   return t1->wait_time < t2->wait_time; // otherwise sort by wait_time
++}
++
+Index: lib/kernel/list.h
+===================================================================
+--- lib/kernel/list.h	(revision 2)
++++ lib/kernel/list.h	(working copy)
+@@ -165,4 +165,7 @@
+ struct list_elem *list_max (struct list *, list_less_func *, void *aux);
+ struct list_elem *list_min (struct list *, list_less_func *, void *aux);
+ 
++// custom greater than function
++bool thread_less_than(const struct list_elem *first, const struct list_elem *second, void *aux);
++
+ #endif /* lib/kernel/list.h */
+Index: threads/thread.c
+===================================================================
+--- threads/thread.c	(revision 2)
++++ threads/thread.c	(working copy)
+@@ -205,7 +205,7 @@
+    is usually a better idea to use one of the synchronization
+    primitives in synch.h. */
+ void
+-thread_block (void) 
++thread_block (void)
+ {
+   ASSERT (!intr_context ());
+   ASSERT (intr_get_level () == INTR_OFF);
+@@ -418,7 +418,7 @@
+ static bool
+ is_thread (struct thread *t)
+ {
+-  return t != NULL && t->magic == THREAD_MAGIC;
++    return t != NULL && t->magic == THREAD_MAGIC;
+ }
+ 
+ /* Does basic initialization of T as a blocked thread named
+Index: threads/thread.h
+===================================================================
+--- threads/thread.h	(revision 3)
++++ threads/thread.h	(working copy)
+@@ -79,6 +79,7 @@
+    only because they are mutually exclusive: only a thread in the
+    ready state is on the run queue, whereas only a thread in the
+    blocked state is on a semaphore wait list. */
++
+ struct thread
+   {
+     /* Owned by thread.c. */
+@@ -87,9 +88,11 @@
+     char name[16];                      /* Name (for debugging purposes). */
+     uint8_t *stack;                     /* Saved stack pointer. */
+     int priority;                       /* Priority. */
++    int64_t wait_time; // wait time 
+ 
+     /* Shared between thread.c and synch.c. */
+     struct list_elem elem;              /* List element. */
++    struct list_elem wait_elem;              /* List element. */
+ 
+ #ifdef USERPROG
+     /* Owned by userprog/process.c. */
+@@ -118,7 +121,7 @@
+ void thread_block (void);
+ void thread_unblock (struct thread *);
+ 
+-struct thread *thread_current (void);
++struct thread * thread_current (void);
+ tid_t thread_tid (void);
+ const char *thread_name (void);
+ 
